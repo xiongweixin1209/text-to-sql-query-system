@@ -534,7 +534,8 @@ const Text2SQLPage = () => {
                                       columns={results.columns}
                                       rowCount={results.rowCount}
                                       executionTime={results.executionTime}
-                                      statistics={results.statistics}  // 新增：传递统计信息
+                                      statistics={results.statistics}
+                                      userQuery={query}
                                   />
                               ) : (
                                   <div className="flex flex-col items-center justify-center h-full text-gray-400 py-20">

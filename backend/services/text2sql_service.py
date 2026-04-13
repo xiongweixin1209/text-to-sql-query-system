@@ -321,6 +321,76 @@ class Text2SQLService:
             results.append(result)
         return results
 
+    def interpret_results(
+            self,
+            user_query: str,
+            columns: List[str],
+            data: List[Dict],
+            max_rows: int = 10
+    ) -> Dict:
+        """
+        对查询结果进行业务解读
+
+        Args:
+            user_query: 用户原始查询
+            columns: 列名列表
+            data: 查询结果数据
+            max_rows: 传给LLM的最大行数
+
+        Returns:
+            Dict: {"success": bool, "interpretation": str, "error": str}
+        """
+        try:
+            # 只取前N行避免token过多
+            sample_data = data[:max_rows]
+
+            # 格式化数据为文本
+            data_text = "，".join(columns) + "\n"
+            for row in sample_data:
+                data_text += "，".join([str(row.get(col, "")) for col in columns]) + "\n"
+
+            if len(data) > max_rows:
+                data_text += f"（仅展示前{max_rows}行，共{len(data)}行）\n"
+
+            prompt = f"""你是一个数据分析助手。用户提出了一个数据查询，现在请你用1-3句简洁的中文，对查询结果进行业务层面的解读。
+    
+    用户的查询需求：{user_query}
+    
+    查询结果：
+    {data_text}
+    
+    要求：
+    1. 只输出解读文字，不要输出任何其他内容
+    2. 从业务角度解读数据，而不是描述数据格式
+    3. 如果数据有明显的规律或异常，请指出
+    4. 控制在3句话以内，简洁明了"""
+
+            result = self.llm.generate(
+                prompt=prompt,
+                temperature=0.3,
+                max_tokens=200
+            )
+
+            if result["success"]:
+                return {
+                    "success": True,
+                    "interpretation": result["sql"].strip(),
+                    "error": None
+                }
+            else:
+                return {
+                    "success": False,
+                    "interpretation": "",
+                    "error": result.get("error", "解读失败")
+                }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "interpretation": "",
+                "error": str(e)
+            }
+
 
 # 全局服务实例
 _text2sql_service = None

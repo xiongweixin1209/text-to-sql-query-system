@@ -456,3 +456,35 @@ async def get_datasource_schema(datasource_id: str):
             status_code=500,
             detail=f"获取Schema失败: {str(e)}"
         )
+
+@router.post("/interpret")
+async def interpret_results(request: dict):
+    """
+    对查询结果进行AI业务解读
+    """
+    try:
+        user_query = request.get("user_query", "")
+        columns = request.get("columns", [])
+        data = request.get("data", [])
+
+        if not user_query or not columns or not data:
+            return {
+                "success": False,
+                "interpretation": "",
+                "error": "参数不完整"
+            }
+
+        result = text2sql_service.interpret_results(
+            user_query=user_query,
+            columns=columns,
+            data=data
+        )
+
+        return result
+
+    except Exception as e:
+        return {
+            "success": False,
+            "interpretation": "",
+            "error": str(e)
+        }

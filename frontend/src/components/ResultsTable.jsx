@@ -8,7 +8,7 @@
  * 5. 前端分页（支持自定义每页条数）✨ 新增
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
     ArrowUpDown,
     ArrowUp,
@@ -24,12 +24,15 @@ import {
     ChevronsRight
 } from 'lucide-react';
 
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
 const ResultsTable = ({
                           data = [],
                           columns = [],
                           rowCount = 0,
                           executionTime = 0,
-                          statistics = null
+                          statistics = null,
+                          userQuery = ''
                       }) => {
     // 排序状态
     const [sortConfig, setSortConfig] = useState({
@@ -40,6 +43,11 @@ const ResultsTable = ({
     // 筛选状态
     const [filters, setFilters] = useState({});
     const [showFilters, setShowFilters] = useState(false);
+
+    // AI解读状态
+    const [interpretation, setInterpretation] = useState('');
+    const [interpretLoading, setInterpretLoading] = useState(false);
+    const interpretedRef = useRef(false);
 
     // 🆕 分页状态
     const [currentPage, setCurrentPage] = useState(1);
@@ -74,6 +82,37 @@ const ResultsTable = ({
     useEffect(() => {
         setCurrentPage(1);
     }, [filters, sortConfig]);
+
+    // 数据加载完后自动请求AI解读
+    useEffect(() => {
+        if (!data || data.length === 0 || !userQuery || interpretedRef.current) return;
+
+        const fetchInterpretation = async () => {
+            setInterpretLoading(true);
+            interpretedRef.current = true;
+            try {
+                const response = await fetch('http://localhost:8000/api/text2sql/interpret', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_query: userQuery,
+                        columns: columns,
+                        data: data.slice(0, 20)
+                    })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    setInterpretation(result.interpretation);
+                }
+            } catch (e) {
+                console.error('解读请求失败', e);
+            } finally {
+                setInterpretLoading(false);
+            }
+        };
+
+        fetchInterpretation();
+    }, [data, userQuery]);
 
     // 应用排序和筛选（不包括分页）
     const filteredAndSortedData = useMemo(() => {
@@ -282,6 +321,46 @@ const ResultsTable = ({
 
     return (
         <div className="space-y-4">
+            {/* 极简图表：仅当恰好2列且第二列全为数字时显示 */}
+            {columns.length === 2 && data.length > 0 && data.every(row => !isNaN(Number(row[columns[1]]))) && (
+                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                    <div className="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">
+                        数据可视化
+                    </div>
+                    <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={data.slice(0, 20)} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                            <XAxis
+                                dataKey={columns[0]}
+                                tick={{ fontSize: 11 }}
+                                angle={-35}
+                                textAnchor="end"
+                                interval={0}
+                            />
+                            <YAxis tick={{ fontSize: 11 }} />
+                            <Tooltip />
+                            <Bar dataKey={columns[1]} fill="#6366f1" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            )}
+
+            {/* AI解读区域 */}
+            {(interpretLoading || interpretation) && (
+                <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl border border-purple-100 p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="text-purple-600 text-sm font-semibold">🤖 AI 数据解读</span>
+                    </div>
+                    {interpretLoading ? (
+                        <div className="flex items-center gap-2 text-sm text-gray-400">
+                            <div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                            正在分析数据...
+                        </div>
+                    ) : (
+                        <p className="text-sm text-gray-700 leading-relaxed">{interpretation}</p>
+                    )}
+                </div>
+            )}
             {/* 统计信息面板 */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {/* 基础统计 */}
