@@ -19,7 +19,7 @@ Text-to-SQL Assistant 是一个面向复杂业务数据仓库环境的 AI 数据
 用户输入"查询销售额最高的前13个商品"，系统自动生成 SQL、执行查询、渲染柱状图，并由 AI 给出业务层面的解读结论。
 
 > 📷 *[截图：查询结果 + 柱状图 + AI数据解读]*
-> `docs/images/01_query_result_with_chart.png`
+> ![查询结果+图表+AI解读](docs/images/01_query_result_with_chart.png)
 
 ---
 
@@ -28,7 +28,7 @@ Text-to-SQL Assistant 是一个面向复杂业务数据仓库环境的 AI 数据
 系统自动分析数据库结构，识别 DWD 明细层与 DWS 汇总层，并按业务域（订单域、客户域、产品域等）归类展示，帮助用户快速理解数仓架构。
 
 > 📷 *[截图：数据库结构页面，展示分层与业务域]*
-> `docs/images/02_database_structure.png`
+> ![数据库结构分层](docs/images/02_database_structure.png)
 
 ---
 
@@ -37,7 +37,7 @@ Text-to-SQL Assistant 是一个面向复杂业务数据仓库环境的 AI 数据
 用户描述分析目标后，系统调用本地 LLM 智能推荐最相关的数据表，标注置信度与推荐理由，支持一键跳转至查询界面并自动勾选推荐表。
 
 > 📷 *[截图：AI智能表推荐结果]*
-> `docs/images/03_ai_table_recommendation.png`
+> ![AI智能表推荐](docs/images/03_ai_table_recommendation.png)
 
 ---
 
@@ -46,7 +46,7 @@ Text-to-SQL Assistant 是一个面向复杂业务数据仓库环境的 AI 数据
 每次查询后自动提供 SQL 优化建议，并可执行 EXPLAIN 分析，展示查询计划、执行步骤、索引使用情况与性能等级评定。
 
 > 📷 *[截图：性能分析面板]*
-> `docs/images/04_performance_analysis.png`
+> ![性能分析面板](docs/images/04_performance_analysis.png)
 
 ---
 
