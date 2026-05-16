@@ -16,6 +16,21 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import DatabaseCognition from '../components/DatabaseCognition';
 import QueryPlanner from '../components/QueryPlanner';
 
+// Tailwind JIT 只能识别完整字符串字面量,运行时模板拼接(`text-${color}-600`)
+// 不会被扫描到 → 生产构建里这些类不存在,样式会静默丢失。
+// 用静态映射保证类名以完整字符串形式出现。
+const TAB_COLORS = {
+  blue:   { text: 'text-blue-600',   badge: 'bg-blue-100 text-blue-600',     bar: 'bg-gradient-to-r from-blue-500 to-indigo-500' },
+  orange: { text: 'text-orange-600', badge: 'bg-orange-100 text-orange-600', bar: 'bg-gradient-to-r from-orange-500 to-red-500' },
+  purple: { text: 'text-purple-600', badge: 'bg-purple-100 text-purple-600', bar: 'bg-gradient-to-r from-purple-500 to-pink-500' },
+};
+
+const EMPTY_COLORS = {
+  blue:   { halo: 'bg-gradient-to-br from-blue-200 to-blue-200',     soft: 'bg-gradient-to-br from-blue-100 to-blue-100',     icon: 'text-blue-400' },
+  orange: { halo: 'bg-gradient-to-br from-orange-200 to-orange-200', soft: 'bg-gradient-to-br from-orange-100 to-orange-100', icon: 'text-orange-400' },
+  purple: { halo: 'bg-gradient-to-br from-purple-200 to-purple-200', soft: 'bg-gradient-to-br from-purple-100 to-purple-100', icon: 'text-purple-400' },
+};
+
 const Text2SQLPage = () => {
   // 全局状态（来自 Context）
   const {
@@ -344,29 +359,32 @@ const Text2SQLPage = () => {
                         { key: 'results', label: '查询结果', icon: BarChart3, color: 'blue', badge: results?.rowCount },
                         { key: 'optimize', label: '优化建议', icon: Sparkles, color: 'orange', badge: optimization?.suggestions?.length, disabled: !optimization },
                         { key: 'analyze', label: '性能分析', icon: BarChart3, color: 'purple', disabled: !performance },
-                      ].map(({ key, label, icon: Icon, color, badge, disabled }) => (
+                      ].map(({ key, label, icon: Icon, color, badge, disabled }) => {
+                        const c = TAB_COLORS[color];
+                        return (
                         <button
                           key={key}
                           onClick={() => setActiveTab(key)}
                           disabled={disabled}
                           className={`group relative px-6 py-4 font-medium text-sm transition-all duration-300 ${
-                            activeTab === key ? `text-${color}-600` : 'text-gray-500 hover:text-gray-700'
+                            activeTab === key ? c.text : 'text-gray-500 hover:text-gray-700'
                           }`}
                         >
                           <span className="flex items-center gap-2">
                             <Icon className={`w-4 h-4 transition-transform duration-300 ${activeTab === key ? 'scale-110' : 'group-hover:scale-110'}`} />
                             {label}
                             {badge != null && (
-                              <span className={`bg-${color}-100 text-${color}-600 px-2 py-0.5 rounded-full text-xs font-semibold animate-scaleIn`}>
+                              <span className={`${c.badge} px-2 py-0.5 rounded-full text-xs font-semibold animate-scaleIn`}>
                                 {badge}
                               </span>
                             )}
                           </span>
                           {activeTab === key && (
-                            <div className={`absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-${color}-500 to-${color === 'orange' ? 'red' : color === 'purple' ? 'pink' : 'indigo'}-500 rounded-t-full`} />
+                            <div className={`absolute bottom-0 left-0 right-0 h-1 ${c.bar} rounded-t-full`} />
                           )}
                         </button>
-                      ))}
+                        );
+                      })}
                     </nav>
                   </div>
 
@@ -459,12 +477,13 @@ const Text2SQLPage = () => {
 };
 
 function EmptyState({ icon: Icon, title, desc, color }) {
+  const c = EMPTY_COLORS[color] || EMPTY_COLORS.blue;
   return (
     <div className="flex flex-col items-center justify-center h-full text-gray-400 py-20">
       <div className="relative mb-6">
-        <div className={`absolute inset-0 bg-gradient-to-br from-${color}-200 to-${color}-200 rounded-full blur-2xl opacity-30 animate-pulse-soft`}></div>
-        <div className={`relative w-28 h-28 bg-gradient-to-br from-${color}-100 to-${color}-100 rounded-full flex items-center justify-center`}>
-          <Icon className={`w-14 h-14 text-${color}-400`} />
+        <div className={`absolute inset-0 ${c.halo} rounded-full blur-2xl opacity-30 animate-pulse-soft`}></div>
+        <div className={`relative w-28 h-28 ${c.soft} rounded-full flex items-center justify-center`}>
+          <Icon className={`w-14 h-14 ${c.icon}`} />
         </div>
       </div>
       <p className="text-lg font-semibold text-gray-600 mb-2">{title}</p>

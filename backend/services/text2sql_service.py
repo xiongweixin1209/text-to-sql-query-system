@@ -180,7 +180,11 @@ class Text2SQLService:
         if not schema:
             return {"sql": "", "success": False, "error": "Schema 为空", "strategy": "rule"}
 
-        table_name = schema[0].get("table_name", "orders")
+        table_name = schema[0].get("table_name")
+        if not table_name:
+            # rule 层只能盲选 schema 首张表,首表无名时降级到 few_shot
+            return self._generate_by_few_shot(query, schema)
+
         if re.search(r'(所有|全部|查询)', query):
             sql = f"SELECT * FROM {table_name} LIMIT 100;"
             return {

@@ -179,58 +179,6 @@ SQL语句：
 
         return prompt.strip()
 
-    @staticmethod
-    def build_rule_based_prompt(
-            user_query: str,
-            schema: str,
-            rule_type: str = "simple_select"
-    ) -> str:
-        """
-        构建规则层Prompt（用于简单查询）
-
-        Args:
-            user_query: 用户查询
-            schema: Schema信息
-            rule_type: 规则类型（simple_select, simple_filter等）
-
-        Returns:
-            str: 规则层prompt
-        """
-        if rule_type == "simple_select":
-            template = f"""请为以下查询生成SQL语句：
-
-{schema}
-
-用户查询：{user_query}
-
-这是一个简单的SELECT查询，请直接输出SQL，格式如下：
-```sql
-SELECT * FROM table_name;
-```
-"""
-
-        elif rule_type == "simple_filter":
-            template = f"""请为以下查询生成SQL语句：
-
-{schema}
-
-用户查询：{user_query}
-
-这是一个简单的筛选查询，请直接输出SQL，格式如下：
-```sql
-SELECT * FROM table_name WHERE condition;
-```
-"""
-
-        else:
-            # 默认使用simple_select
-            template = PromptTemplates.build_rule_based_prompt(
-                user_query, schema, "simple_select"
-            )
-
-        return template.strip()
-
-
 # 预定义的常用约束
 class CommonConstraints:
     """常用的SQL生成约束"""
@@ -328,16 +276,6 @@ def test_prompt_templates():
         constraints=CommonConstraints.SECURITY
     )
     print(zero_shot)
-
-    # 测试3: Rule-based Prompt
-    print("\n\n【测试3：Rule-based Prompt】")
-    print("-" * 60)
-    rule_based = PromptTemplates.build_rule_based_prompt(
-        user_query="查询所有订单",
-        schema=schema,
-        rule_type="simple_select"
-    )
-    print(rule_based)
 
     print("\n" + "=" * 60)
     print("测试完成！")
