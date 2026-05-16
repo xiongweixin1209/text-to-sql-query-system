@@ -16,6 +16,7 @@ try:
     from ..services.sql_optimizer import get_optimizer
     from ..services.query_performance_analyzer import get_analyzer
     from ..services.query_cache_service import get_cache_service
+    from ..config import settings
     from .models import (
         Text2SQLRequest, Text2SQLResponse,
         BatchText2SQLRequest, BatchText2SQLResponse,
@@ -30,6 +31,7 @@ except ImportError:
     from services.sql_optimizer import get_optimizer
     from services.query_performance_analyzer import get_analyzer
     from services.query_cache_service import get_cache_service
+    from config import settings
     from api.models import (
         Text2SQLRequest, Text2SQLResponse,
         BatchText2SQLRequest, BatchText2SQLResponse,
@@ -102,8 +104,11 @@ async def execute_sql(request: ExecuteSQLRequest):
 
             schema_dicts = convert_schema_to_dict(request.table_schema)
 
-            # Step 1a: 查询缓存
-            cached = cache_service.get(request.query, datasource_id_str)
+            # Step 1a: 查询缓存（按 query + datasource + schema指纹 + force_strategy）
+            cached = cache_service.get(
+                request.query, datasource_id_str,
+                schema=schema_dicts, force_strategy=request.force_strategy,
+            )
             if cached:
                 sql = cached["sql"]
                 generation_result = {
@@ -134,7 +139,8 @@ async def execute_sql(request: ExecuteSQLRequest):
                 # 写入缓存
                 cache_service.set(
                     request.query, datasource_id_str,
-                    generation_result["sql"], generation_result.get("strategy")
+                    generation_result["sql"], generation_result.get("strategy"),
+                    schema=schema_dicts, force_strategy=request.force_strategy,
                 )
 
             sql = generation_result["sql"]
@@ -146,7 +152,7 @@ async def execute_sql(request: ExecuteSQLRequest):
                 raise HTTPException(status_code=404,
                                     detail=f"数据源不存在: {request.datasource_id}")
         else:
-            db_path = request.db_path or "D:/IndividualProject/text-to-sql/data/demo_ecommerce.db"
+            db_path = request.db_path or settings.DEMO_DB_PATH
             executor = get_executor(db_path)
 
         # Step 3: 执行
@@ -213,7 +219,7 @@ async def analyze_query(request: AnalyzeQueryRequest):
                                     detail=f"数据源不存在: {request.datasource_id}")
             db_path = datasource_info["db_path"]
         else:
-            db_path = request.db_path or "D:/IndividualProject/text-to-sql/data/demo_ecommerce.db"
+            db_path = request.db_path or settings.DEMO_DB_PATH
 
         analyzer = get_analyzer(db_path)
         result = analyzer.analyze(request.sql)
@@ -302,8 +308,8 @@ async def get_example_stats():
         stats = text2sql_service.retriever.get_statistics()
         return ExampleStats(
             total_examples=stats.get("total_examples", 0),
-            categories=stats.get("by_category", {}),
-            difficulties=stats.get("by_difficulty", {})
+            categories=stats.get("categories", {}),
+            difficulties=stats.get("difficulties", {})
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
@@ -401,14 +407,29 @@ def _detect_chart_type(intent: str, columns: list, data: list) -> str:
     if any(kw in intent.lower() for kw in pie_kws):
         return "pie"
 
-    # 第一列也是数值 → 散点图
-    try:
-        if all(not math.isnan(float(row.get(columns[0], "x"))) for row in data[:5]):
-            return "scatter"
-    except (ValueError, TypeError):
-        pass
+    # 散点图需要前两列都是数值
+    if _column_is_numeric(data, columns[0]) and _column_is_numeric(data, columns[1]):
+        return "scatter"
 
     return "bar"
+
+
+def _column_is_numeric(data: list, col: str, sample: int = 5) -> bool:
+    """判断列在前 N 行内是否全为可解析的数值"""
+    rows = data[:sample]
+    if not rows:
+        return False
+    for row in rows:
+        val = row.get(col)
+        if val is None or val == "":
+            return False
+        try:
+            f = float(val)
+        except (ValueError, TypeError):
+            return False
+        if math.isnan(f):
+            return False
+    return True
 
 
 @router.post("/recommend-chart")

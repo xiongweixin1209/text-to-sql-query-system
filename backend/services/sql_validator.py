@@ -4,215 +4,123 @@ SQL Validator - SQL验证器
 """
 
 import sqlparse
-from typing import Dict, List, Tuple
-import re
+from sqlparse import tokens as T
+from typing import Dict, List, Tuple, Optional
 
 
 class SQLValidator:
     """SQL验证器"""
-    
-    # 危险的SQL关键词（禁止使用）
-    DANGEROUS_KEYWORDS = {
-        'DROP', 'DELETE', 'UPDATE', 'INSERT', 'TRUNCATE',
-        'ALTER', 'CREATE', 'GRANT', 'REVOKE', 'EXEC',
-        'EXECUTE', 'UNION', 'INTO', 'OUTFILE', 'DUMPFILE',
-        'LOAD_FILE', 'BENCHMARK'
+
+    # 仅作为 DML/DDL 关键词 token 出现时才禁止（避免误伤含 CREATED_AT 等的列名）
+    FORBIDDEN_DML_DDL = {
+        'INSERT', 'UPDATE', 'DELETE',
+        'DROP', 'ALTER', 'CREATE', 'TRUNCATE',
+        'GRANT', 'REVOKE', 'REPLACE',
     }
-    
-    # 危险的SQL模式
-    DANGEROUS_PATTERNS = [
-        r';\s*(DROP|DELETE|UPDATE|INSERT)',  # 多语句攻击
-        r'--',  # SQL注释
-        r'/\*.*\*/',  # 多行注释
-        r'xp_',  # SQL Server扩展存储过程
-        r'sp_',  # SQL Server系统存储过程
-    ]
-    
+
+    # 文件/进程类危险函数名 —— 即便作为标识符也禁止
+    FORBIDDEN_NAMES = {
+        'OUTFILE', 'DUMPFILE', 'LOAD_FILE',
+        'BENCHMARK', 'SLEEP',
+    }
+
     def __init__(self):
-        """初始化验证器"""
         pass
-    
+
     def validate(self, sql: str) -> Dict:
-        """
-        完整验证SQL
-        
-        Args:
-            sql: SQL语句
-        
-        Returns:
-            Dict: {
-                "valid": bool,
-                "error": str,
-                "warnings": List[str]
-            }
-        """
-        warnings = []
-        
-        # 1. 基础检查
+        """完整验证 SQL,返回 {valid, error, warnings}"""
         if not sql or not sql.strip():
-            return {
-                "valid": False,
-                "error": "SQL语句不能为空",
-                "warnings": []
-            }
-        
+            return {"valid": False, "error": "SQL语句不能为空", "warnings": []}
+
         sql = sql.strip()
-        
-        # 2. 语法验证
-        syntax_check = self._check_syntax(sql)
-        if not syntax_check["valid"]:
-            return syntax_check
-        
-        # 3. 安全检查
-        security_check = self._check_security(sql)
-        if not security_check["valid"]:
-            return security_check
-        
-        warnings.extend(security_check.get("warnings", []))
-        
-        # 4. SELECT检查
-        select_check = self._check_select_only(sql)
+        warnings: List[str] = []
+
+        # 1. 解析(单条语句)
+        parsed = self._parse_single(sql)
+        if isinstance(parsed, dict):  # 解析失败返回 dict
+            return parsed
+
+        # 2. SELECT / WITH 入口检查
+        select_check = self._check_select_or_with(parsed, sql)
         if not select_check["valid"]:
             return select_check
-        
         warnings.extend(select_check.get("warnings", []))
-        
-        return {
-            "valid": True,
-            "error": None,
-            "warnings": warnings
-        }
-    
-    def _check_syntax(self, sql: str) -> Dict:
-        """
-        检查SQL语法
-        
-        Args:
-            sql: SQL语句
-        
-        Returns:
-            Dict: 验证结果
-        """
+
+        # 3. token 级安全检查
+        security_check = self._check_security(parsed, sql)
+        if not security_check["valid"]:
+            return security_check
+        warnings.extend(security_check.get("warnings", []))
+
+        return {"valid": True, "error": None, "warnings": warnings}
+
+    def _parse_single(self, sql: str):
+        """解析 SQL,返回 sqlparse Statement 或错误 dict"""
         try:
-            # 使用sqlparse解析SQL
-            parsed = sqlparse.parse(sql)
-            
-            if not parsed:
-                return {
-                    "valid": False,
-                    "error": "SQL语法错误：无法解析",
-                    "warnings": []
-                }
-            
-            # 检查是否有多条语句
-            if len(parsed) > 1:
-                return {
-                    "valid": False,
-                    "error": "不支持多条SQL语句",
-                    "warnings": []
-                }
-            
-            return {
-                "valid": True,
-                "error": None,
-                "warnings": []
-            }
-            
+            statements = sqlparse.parse(sql)
         except Exception as e:
+            return {"valid": False, "error": f"SQL语法错误: {str(e)}", "warnings": []}
+
+        if not statements:
+            return {"valid": False, "error": "SQL语法错误：无法解析", "warnings": []}
+
+        # 末尾分号会被 sqlparse 拆成空 statement,过滤掉
+        non_empty = [s for s in statements if str(s).strip().rstrip(";").strip()]
+        if len(non_empty) > 1:
+            return {"valid": False, "error": "不支持多条SQL语句", "warnings": []}
+
+        return non_empty[0]
+
+    def _check_select_or_with(self, parsed, sql: str) -> Dict:
+        """允许 SELECT 或 WITH(CTE) 起始"""
+        warnings: List[str] = []
+
+        first_token = next(
+            (t for t in parsed.tokens if not t.is_whitespace), None
+        )
+        if first_token is None:
+            return {"valid": False, "error": "无法识别SQL语句类型", "warnings": []}
+
+        first_kw = str(first_token).strip().upper()
+        if not (first_kw.startswith("SELECT") or first_kw.startswith("WITH")):
             return {
                 "valid": False,
-                "error": f"SQL语法错误: {str(e)}",
-                "warnings": []
+                "error": f"只允许 SELECT / WITH 查询，当前是: {first_kw.split()[0] if first_kw else '?'}",
+                "warnings": [],
             }
-    
-    def _check_security(self, sql: str) -> Dict:
-        """
-        安全检查
-        
-        Args:
-            sql: SQL语句
-        
-        Returns:
-            Dict: 验证结果
-        """
-        sql_upper = sql.upper()
-        warnings = []
-        
-        # 1. 检查危险关键词
-        for keyword in self.DANGEROUS_KEYWORDS:
-            if keyword in sql_upper:
-                return {
-                    "valid": False,
-                    "error": f"不允许使用 {keyword} 操作",
-                    "warnings": []
-                }
-        
-        # 2. 检查危险模式
-        for pattern in self.DANGEROUS_PATTERNS:
-            if re.search(pattern, sql, re.IGNORECASE):
-                return {
-                    "valid": False,
-                    "error": f"检测到不安全的SQL模式",
-                    "warnings": []
-                }
-        
-        # 3. 检查分号（可能的SQL注入）
-        if ';' in sql and not sql.strip().endswith(';'):
-            warnings.append("SQL中包含分号，请确认是否为单条语句")
-        
-        return {
-            "valid": True,
-            "error": None,
-            "warnings": warnings
-        }
-    
-    def _check_select_only(self, sql: str) -> Dict:
-        """
-        检查是否只包含SELECT语句
-        
-        Args:
-            sql: SQL语句
-        
-        Returns:
-            Dict: 验证结果
-        """
-        warnings = []
-        
-        # 解析SQL
-        parsed = sqlparse.parse(sql)[0]
-        
-        # 获取第一个token（应该是SELECT）
-        first_token = None
-        for token in parsed.tokens:
-            if not token.is_whitespace:
-                first_token = token
-                break
-        
-        if not first_token:
-            return {
-                "valid": False,
-                "error": "无法识别SQL语句类型",
-                "warnings": []
-            }
-        
-        # 检查是否是SELECT
-        first_keyword = str(first_token).strip().upper()
-        if not first_keyword.startswith('SELECT'):
-            return {
-                "valid": False,
-                "error": f"只允许SELECT查询，当前是: {first_keyword}",
-                "warnings": []
-            }
-        
-        # 检查是否有LIMIT（建议添加）
-        if 'LIMIT' not in sql.upper():
+
+        if "LIMIT" not in sql.upper():
             warnings.append("建议添加LIMIT限制返回行数，避免查询过大结果集")
-        
-        return {
-            "valid": True,
-            "error": None,
-            "warnings": warnings
-        }
+
+        return {"valid": True, "error": None, "warnings": warnings}
+
+    def _check_security(self, parsed, sql: str) -> Dict:
+        """基于 token 类型的检查,避免子串误伤(如列名 CREATED_AT)"""
+        warnings: List[str] = []
+
+        for token in parsed.flatten():
+            # DML/DDL 关键词 token —— 不会匹配普通标识符
+            if token.ttype in (T.Keyword.DML, T.Keyword.DDL):
+                kw = token.normalized.upper().strip()
+                if kw in self.FORBIDDEN_DML_DDL:
+                    return {
+                        "valid": False,
+                        "error": f"不允许使用 {kw} 操作",
+                        "warnings": [],
+                    }
+            # 文件/进程类函数 —— 作为标识符出现也要拦
+            if token.ttype in (T.Name, T.Keyword) and token.value.upper() in self.FORBIDDEN_NAMES:
+                return {
+                    "valid": False,
+                    "error": f"不允许使用 {token.value} 函数",
+                    "warnings": [],
+                }
+
+        # 多语句已在 _parse_single 拦截,这里只补一条软提示
+        if ";" in sql.rstrip(";").rstrip():
+            warnings.append("SQL中包含分号，请确认是否为单条语句")
+
+        return {"valid": True, "error": None, "warnings": warnings}
 
 
 def get_validator() -> SQLValidator:
@@ -263,9 +171,24 @@ if __name__ == "__main__":
             "expected": "invalid"
         },
         {
-            "name": "注释攻击",
-            "sql": "SELECT * FROM orders -- WHERE id = 1",
-            "expected": "invalid"
+            "name": "含 SQL 行注释（合法）",
+            "sql": "SELECT * FROM orders -- 取最近订单\nLIMIT 10;",
+            "expected": "valid"
+        },
+        {
+            "name": "CTE 查询（WITH）",
+            "sql": "WITH t AS (SELECT id FROM orders) SELECT * FROM t LIMIT 5;",
+            "expected": "valid"
+        },
+        {
+            "name": "列名含 CREATED_AT（合法）",
+            "sql": "SELECT id, created_at FROM events WHERE created_at > '2024-01-01' LIMIT 10;",
+            "expected": "valid"
+        },
+        {
+            "name": "UNION ALL（合法）",
+            "sql": "SELECT id FROM a UNION ALL SELECT id FROM b LIMIT 10;",
+            "expected": "valid"
         },
         {
             "name": "空SQL",

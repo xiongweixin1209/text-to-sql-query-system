@@ -28,8 +28,33 @@ CREATE INDEX IF NOT EXISTS idx_hit_count  ON query_cache(hit_count DESC);
 """
 
 
-def _make_key(query: str, datasource_id: Optional[str]) -> str:
-    raw = f"{query.strip().lower()}|{datasource_id or ''}"
+def _schema_fingerprint(schema: Optional[list]) -> str:
+    """对 schema 取一个稳定指纹（表名 + 列名清单）。
+
+    schema 形如 [{"table_name": str, "columns": [{"name": str, "type": str}, ...]}, ...]。
+    不同 schema 即便针对同一句查询也必须命中不同缓存,否则会产出引用错误列名的 SQL。
+    """
+    if not schema:
+        return ""
+    parts = []
+    for tbl in sorted(schema, key=lambda t: t.get("table_name", "")):
+        cols = sorted(c.get("name", "") for c in tbl.get("columns", []))
+        parts.append(f"{tbl.get('table_name', '')}:{','.join(cols)}")
+    return "|".join(parts)
+
+
+def _make_key(
+    query: str,
+    datasource_id: Optional[str],
+    schema: Optional[list] = None,
+    force_strategy: Optional[str] = None,
+) -> str:
+    raw = "|".join([
+        query.strip().lower(),
+        datasource_id or "",
+        _schema_fingerprint(schema),
+        force_strategy or "",
+    ])
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 
@@ -54,9 +79,15 @@ class QueryCacheService:
         except Exception as e:
             print(f"⚠️ 查询缓存表初始化失败: {e}")
 
-    def get(self, query: str, datasource_id: Optional[str]) -> Optional[Dict]:
+    def get(
+        self,
+        query: str,
+        datasource_id: Optional[str],
+        schema: Optional[list] = None,
+        force_strategy: Optional[str] = None,
+    ) -> Optional[Dict]:
         """从缓存查找，命中则更新统计并返回，否则返回 None"""
-        key = _make_key(query, datasource_id)
+        key = _make_key(query, datasource_id, schema, force_strategy)
         try:
             conn = _get_conn()
             row = conn.execute(
@@ -82,9 +113,17 @@ class QueryCacheService:
             print(f"⚠️ 缓存读取失败: {e}")
         return None
 
-    def set(self, query: str, datasource_id: Optional[str], sql: str, strategy: str = None):
+    def set(
+        self,
+        query: str,
+        datasource_id: Optional[str],
+        sql: str,
+        strategy: str = None,
+        schema: Optional[list] = None,
+        force_strategy: Optional[str] = None,
+    ):
         """写入缓存（已存在则忽略，不覆盖）"""
-        key = _make_key(query, datasource_id)
+        key = _make_key(query, datasource_id, schema, force_strategy)
         try:
             conn = _get_conn()
             conn.execute(
